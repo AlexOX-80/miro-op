@@ -89,6 +89,51 @@ class ConnectorTests(unittest.TestCase):
             "https://openproject.example.com/work_packages/43",
         )
 
+    def test_openproject_story_parsing_reads_extended_fields(self) -> None:
+        client = OpenProjectClient("https://openproject.example.com", "token")
+
+        story = client._parse_story(
+            {
+                "id": 44,
+                "subject": "Extended",
+                "estimatedTime": "PT6H",
+                "dueDate": "2026-03-20",
+                "startDate": "2026-03-10",
+                "_embedded": {
+                    "status": {"name": "New"},
+                    "project": {"name": "Shop"},
+                    "version": {"name": "R1"},
+                },
+                "_links": {
+                    "self": {"href": "/api/v3/work_packages/44"},
+                    "type": {"title": "User story"},
+                    "responsible": {"title": "David Knaeple"},
+                },
+            }
+        )
+
+        self.assertEqual(story.type_name, "User story")
+        self.assertEqual(story.responsible_name, "David Knaeple")
+        self.assertEqual(story.estimated_time, "PT6H")
+        self.assertEqual(story.start_date, "2026-03-10")
+        self.assertEqual(story.due_date, "2026-03-20")
+
+    def test_openproject_parses_activity_comments(self) -> None:
+        client = OpenProjectClient("https://openproject.example.com", "token")
+
+        comment = client._parse_comment(
+            {
+                "id": 7,
+                "comment": {"raw": "Looks good"},
+                "createdAt": "2026-03-14T10:00:00Z",
+                "_links": {"user": {"title": "Alexander Ochs"}},
+            }
+        )
+
+        self.assertIsNotNone(comment)
+        self.assertEqual(comment.author_name, "Alexander Ochs")
+        self.assertEqual(comment.comment, "Looks good")
+
     def test_miro_create_cards_assigns_rows_per_status(self) -> None:
         client = MiroClient("https://api.miro.com/v2", "token", "board")
         stories = [
@@ -286,6 +331,30 @@ class ConnectorTests(unittest.TestCase):
         self.assertEqual(client._resolve_type_id("User story"), 6)
         self.assertEqual(client._resolve_version_id("Sprint KW 12/13 26"), 1649)
 
+    def test_openproject_fetch_recent_versions_sorts_descending(self) -> None:
+        client = OpenProjectClient("https://openproject.example.com", "token")
+
+        class DummyHttp:
+            def get_json(self, path, query=None):
+                self.path = path
+                return {
+                    "count": 3,
+                    "total": 3,
+                    "_embedded": {
+                        "elements": [
+                            {"id": 10, "name": "Older"},
+                            {"id": 12, "name": "Newest"},
+                            {"id": 11, "name": "Middle"},
+                        ]
+                    },
+                }
+
+        client.http = DummyHttp()
+
+        versions = client.fetch_recent_versions(limit=2)
+        self.assertEqual(client.http.path, "/api/v3/versions")
+        self.assertEqual(versions, [{"id": 12, "name": "Newest"}, {"id": 11, "name": "Middle"}])
+
     def test_openproject_fetch_story_reads_single_work_package(self) -> None:
         client = OpenProjectClient("https://openproject.example.com", "token")
 
@@ -309,6 +378,74 @@ class ConnectorTests(unittest.TestCase):
         story = client.fetch_story(99)
         self.assertEqual(dummy_http.path, "/api/v3/work_packages/99")
         self.assertEqual(story.id, 99)
+
+    def test_openproject_update_story_status_uses_allowed_schema_values(self) -> None:
+        client = OpenProjectClient("https://openproject.example.com", "token")
+
+        class DummyHttp:
+            def get_json(self, path, query=None):
+                if path == "/api/v3/work_packages/7":
+                    return {
+                        "id": 7,
+                        "subject": "Single",
+                        "lockVersion": 3,
+                        "_embedded": {
+                            "status": {"name": "Neu"},
+                            "project": {"name": "P"},
+                            "version": {"name": "R"},
+                        },
+                        "_links": {
+                            "self": {"href": "/api/v3/work_packages/7"},
+                            "schema": {"href": "/api/v3/work_packages/schemas/default"},
+                        },
+                    }
+                raise AssertionError(f"Unexpected path {path}")
+
+            def post_json(self, path, payload):
+                if path == "/api/v3/work_packages/7/form":
+                    self.form_payload = payload
+                    return {
+                        "_embedded": {
+                            "schema": {
+                                "status": {
+                                    "_embedded": {
+                                        "allowedValues": [
+                                            {"name": "Neu", "_links": {"self": {"href": "/api/v3/statuses/1"}}},
+                                            {"name": "Ready", "_links": {"self": {"href": "/api/v3/statuses/2"}}},
+                                        ]
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                raise AssertionError(f"Unexpected post path {path}")
+
+            def patch_json(self, path, payload):
+                self.patched_path = path
+                self.payload = payload
+                return {
+                    "id": 7,
+                    "subject": "Single",
+                    "_embedded": {
+                        "status": {"name": "Ready"},
+                        "project": {"name": "P"},
+                        "version": {"name": "R"},
+                    },
+                    "_links": {"self": {"href": "/api/v3/work_packages/7"}},
+                }
+
+        dummy_http = DummyHttp()
+        client.http = dummy_http
+
+        story = client.update_story_status(7, "Ready")
+        self.assertEqual(dummy_http.form_payload, {"lockVersion": 3})
+        self.assertEqual(dummy_http.patched_path, "/api/v3/work_packages/7")
+        self.assertEqual(
+            dummy_http.payload,
+            {"lockVersion": 3, "_links": {"status": {"href": "/api/v3/statuses/2"}}},
+        )
+        self.assertEqual(story.status_name, "Ready")
 
 
 if __name__ == "__main__":

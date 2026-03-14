@@ -1,0 +1,11 @@
+{
+  "name": "op-zammad-miro-connector",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "sync:mirotone": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/sync-mirotone.ps1"
+  },
+  "dependencies": {
+    "mirotone": "^5.3.2"
+  }
+}

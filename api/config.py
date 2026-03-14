@@ -13,5 +13,8 @@ def app(environ, start_response):
             "boardId": settings.miro_board_id,
             "versionName": settings.openproject_version_name,
             "appPublicUrl": settings.app_public_url,
+            "oauthStartUrl": f"{settings.app_public_url}/api/oauth/start",
+            "oauthStatusUrl": f"{settings.app_public_url}/api/oauth/status",
+            "statuses": service.list_all_statuses(),
         },
     )

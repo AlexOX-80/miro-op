@@ -4,17 +4,38 @@
     <meta charset="utf-8">
     <title>OpenProject Story verbinden</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="/vendor/mirotone.css">
     <link rel="stylesheet" href="/styles.css">
     <script src="https://miro.com/app/static/sdk/v2/miro.js"></script>
   </head>
   <body>
     <main class="shell">
-      <h1>Story verbinden</h1>
-      <label class="label" for="story-select">OpenProject Story</label>
-      <select id="story-select"></select>
-      <button id="connect-button" type="button">Verbinden</button>
-      <p id="connect-status"></p>
+      <section class="miro-card" style="min-height:auto;">
+        <header class="miro-topbar">
+          <div class="miro-topbar-main">
+            <div class="miro-title-row">
+              <span class="miro-icon-badge">OP</span>
+              <h1>Story verbinden</h1>
+            </div>
+            <p class="lead">Waehle die passende OpenProject-Story aus und verknuepfe sie mit dieser App Card.</p>
+          </div>
+        </header>
+        <div class="miro-main">
+          <div class="muted-box" id="oauth-help"></div>
+          <div class="connect-form">
+            <label class="label" for="story-select">OpenProject Story</label>
+            <select id="story-select"></select>
+            <div class="miro-actions">
+              <button class="button button-primary" id="connect-button" type="button">
+                <span class="icon icon-link" aria-hidden="true"></span>
+                Mit Story verbinden
+              </button>
+            </div>
+            <div class="status-box" id="connect-status"></div>
+          </div>
+        </div>
+      </section>
     </main>
     <script type="module" src="/connect.js"></script>
   </body>
-  </html>
+</html>

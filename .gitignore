@@ -5,3 +5,4 @@ __pycache__/
 .vercel/
 
 .vercel
+node_modules/

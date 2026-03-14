@@ -1,4 +1,5 @@
 const gridNode = document.querySelector("#setup-grid");
+const iconGridNode = document.querySelector("#icon-grid");
 
 function appendRow(label, value) {
   const dt = document.createElement("dt");
@@ -21,7 +22,31 @@ async function bootstrap() {
   appendRow("Open Modal URL", payload.openModalUrl);
   appendRow("Backend Health URL", payload.healthUrl);
   appendRow("Stories API URL", payload.storiesApiUrl);
+  appendRow("OAuth Start URL", payload.oauthStartUrl);
+  appendRow("OAuth Status URL", payload.oauthStatusUrl);
+  appendRow("OAuth Redirect URI", payload.oauthRedirectUri);
   appendRow("Board ID", payload.boardId);
+
+  for (const icon of payload.icons) {
+    const card = document.createElement("article");
+    card.className = "icon-card";
+
+    const title = document.createElement("h3");
+    title.textContent = icon.label;
+
+    const preview = document.createElement("img");
+    preview.src = icon.url;
+    preview.alt = icon.label;
+    preview.className = "icon-preview";
+
+    const link = document.createElement("a");
+    link.href = icon.url;
+    link.textContent = "SVG herunterladen";
+    link.setAttribute("download", "");
+
+    card.append(title, preview, link);
+    iconGridNode.append(card);
+  }
 }
 
 bootstrap().catch((error) => {

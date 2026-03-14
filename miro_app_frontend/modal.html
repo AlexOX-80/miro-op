@@ -2,19 +2,86 @@
 <html lang="de">
   <head>
     <meta charset="utf-8">
-    <title>OpenProject Detailansicht</title>
+    <title>OpenProject Details</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <link rel="stylesheet" href="/styles.css">
+    <link rel="stylesheet" href="/vendor/mirotone.css">
+    <link rel="stylesheet" href="/modal.css">
+    <script src="https://miro.com/app/static/sdk/v2/miro.js"></script>
   </head>
-  <body>
-    <main class="shell">
-      <h1 id="title">OpenProject Story</h1>
-      <p id="meta"></p>
-      <p id="description"></p>
-      <a id="story-link" href="#" target="_blank" rel="noreferrer">Story in OpenProject öffnen</a>
-      <button id="refresh-button" type="button">App Card aktualisieren</button>
-      <p id="modal-status"></p>
+  <body class="opm-panel">
+    <header class="opm-header">
+      <div class="opm-header-top">
+        <div class="opm-identity">
+          <span class="opm-badge">OP</span>
+          <span class="opm-type" id="type-name">User Story</span>
+        </div>
+        <a
+          class="button-icon button-icon-small icon-link"
+          id="story-link"
+          href="#"
+          target="_blank"
+          rel="noreferrer"
+          aria-label="In OpenProject oeffnen"
+          title="In OpenProject oeffnen"
+        ></a>
+      </div>
+      <h1 class="opm-title" id="title">OpenProject Story</h1>
+      <dl class="opm-meta" id="meta"></dl>
+    </header>
+
+    <nav class="opm-tabs" aria-label="Ansichten">
+      <button class="button button-small button-secondary opm-tab is-active" type="button" data-tab="details">
+        Details
+      </button>
+      <button class="button button-small button-secondary opm-tab" type="button" data-tab="description">
+        Beschreibung
+      </button>
+      <button class="button button-small button-secondary opm-tab" type="button" data-tab="comments">
+        Kommentare
+      </button>
+    </nav>
+
+    <main class="opm-content">
+      <section class="opm-view is-active" data-view="details">
+        <section class="opm-section">
+          <div class="opm-props" id="field-list"></div>
+        </section>
+        <section class="opm-section">
+          <button class="button button-primary button-small opm-full-button" id="refresh-button" type="button">
+            <span class="icon icon-refresh" aria-hidden="true"></span>
+            App Card aktualisieren
+          </button>
+          <div class="opm-status" id="modal-status"></div>
+        </section>
+      </section>
+
+      <section class="opm-view" data-view="description">
+        <section class="opm-section">
+          <div class="opm-description" id="description"></div>
+        </section>
+      </section>
+
+      <section class="opm-view" data-view="comments">
+        <section class="opm-section">
+          <div class="opm-composer">
+            <textarea
+              id="comment-input"
+              class="opm-textarea"
+              placeholder="Kommentar in OpenProject hinterlassen ..."
+            ></textarea>
+            <button class="button button-primary button-small opm-full-button" id="comment-submit" type="button">
+              <span class="icon icon-comment" aria-hidden="true"></span>
+              Kommentar senden
+            </button>
+          </div>
+          <div class="opm-status" id="comment-status"></div>
+        </section>
+        <section class="opm-section">
+          <div class="opm-comments" id="comment-list"></div>
+        </section>
+      </section>
     </main>
+
     <script type="module" src="/modal.js"></script>
   </body>
-  </html>
+</html>

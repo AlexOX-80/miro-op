@@ -15,6 +15,19 @@ def app(environ, start_response):
             "openModalUrl": f"{settings.app_public_url}/modal.html",
             "healthUrl": f"{settings.app_public_url}/api/health",
             "storiesApiUrl": f"{settings.app_public_url}/api/stories",
+            "oauthStartUrl": f"{settings.app_public_url}/api/oauth/start",
+            "oauthStatusUrl": f"{settings.app_public_url}/api/oauth/status",
+            "oauthRedirectUri": settings.miro_oauth_redirect_uri,
             "boardId": settings.miro_board_id,
+            "icons": [
+                {
+                    "label": "Kontursymbol",
+                    "url": f"{settings.app_public_url}/icons/openproject-miro-outline.svg",
+                },
+                {
+                    "label": "Farbsymbol",
+                    "url": f"{settings.app_public_url}/icons/openproject-miro-color.svg",
+                },
+            ],
         },
     )

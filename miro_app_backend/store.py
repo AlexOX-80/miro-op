@@ -73,3 +73,22 @@ class LinkStore:
 
     def _write(self, payload: dict[str, dict[str, str | int]]) -> None:
         self.data_file.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+class TokenStore:
+    def __init__(self, data_file: Path) -> None:
+        self.data_file = data_file
+        self.data_file.parent.mkdir(parents=True, exist_ok=True)
+
+    def save_token(self, access_token: str) -> None:
+        self.data_file.write_text(json.dumps({"access_token": access_token}, indent=2), encoding="utf-8")
+
+    def get_token(self) -> str | None:
+        if not self.data_file.exists():
+            return None
+        payload = json.loads(self.data_file.read_text(encoding="utf-8"))
+        token = payload.get("access_token")
+        return str(token) if token else None
+
+    def has_token(self) -> bool:
+        return self.get_token() is not None

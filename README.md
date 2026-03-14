@@ -98,6 +98,9 @@ Fuer Deployment nach Vercel liegt die Konfiguration in `vercel.json`.
 Wichtige neue Variablen:
 
 - `MIRO_APP_PUBLIC_URL`: oeffentliche URL, unter der Miro das Frontend erreicht
+- `MIRO_CLIENT_ID`
+- `MIRO_CLIENT_SECRET`
+- `MIRO_OAUTH_REDIRECT_URI`
 - `APP_BACKEND_HOST`
 - `APP_BACKEND_PORT`
 - `APP_DATA_FILE`: lokale Mapping-Datei fuer `app_card_id -> work_package_id`

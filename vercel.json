@@ -4,10 +4,27 @@
     { "src": "/api/health", "dest": "/api/health.py" },
     { "src": "/api/config", "dest": "/api/config.py" },
     { "src": "/api/setup", "dest": "/api/setup.py" },
+    { "src": "/api/oauth/start", "dest": "/api/oauth_start.py" },
+    { "src": "/api/oauth/status", "dest": "/api/oauth_status.py" },
+    { "src": "/api/oauth/callback", "dest": "/api/oauth_callback.py" },
+    { "src": "/api/versions", "dest": "/api/versions.py" },
     { "src": "/api/stories", "dest": "/api/stories.py" },
     { "src": "/api/app-cards/connect", "dest": "/api/app_cards_connect.py" },
+    { "src": "/api/app-cards/([^/]+)/comments", "dest": "/api/app_cards_comments.py?app_card_id=$1" },
     { "src": "/api/app-cards/([^/]+)/refresh", "dest": "/api/app_cards_refresh.py?app_card_id=$1" },
     { "src": "/api/app-cards/([^/]+)", "dest": "/api/app_cards_detail.py?app_card_id=$1" },
-    { "src": "/(.*)", "dest": "/$1" }
+    { "src": "/", "dest": "/miro_app_frontend/index.html" },
+    { "src": "/setup.html", "dest": "/miro_app_frontend/setup.html" },
+    { "src": "/connect.html", "dest": "/miro_app_frontend/connect.html" },
+    { "src": "/modal.html", "dest": "/miro_app_frontend/modal.html" },
+    { "src": "/modal.css", "dest": "/miro_app_frontend/modal.css" },
+    { "src": "/styles.css", "dest": "/miro_app_frontend/styles.css" },
+    { "src": "/vendor/mirotone.css", "dest": "/miro_app_frontend/vendor/mirotone.css" },
+    { "src": "/app.js", "dest": "/miro_app_frontend/app.js" },
+    { "src": "/setup.js", "dest": "/miro_app_frontend/setup.js" },
+    { "src": "/connect.js", "dest": "/miro_app_frontend/connect.js" },
+    { "src": "/modal.js", "dest": "/miro_app_frontend/modal.js" },
+    { "src": "/icons/openproject-miro-outline.svg", "dest": "/miro_app_frontend/icons/openproject-miro-outline.svg" },
+    { "src": "/icons/openproject-miro-color.svg", "dest": "/miro_app_frontend/icons/openproject-miro-color.svg" }
   ]
 }

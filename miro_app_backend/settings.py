@@ -16,6 +16,9 @@ class AppBackendSettings:
     openproject_story_type: str
     miro_base_url: str
     miro_access_token: str
+    miro_client_id: str
+    miro_client_secret: str
+    miro_oauth_redirect_uri: str
     miro_board_id: str
     app_public_url: str
     backend_host: str
@@ -44,7 +47,13 @@ def load_settings(env_file: str | None = None) -> AppBackendSettings:
         openproject_version_name=_require(values, "OPENPROJECT_VERSION_NAME"),
         openproject_story_type=values.get("OPENPROJECT_STORY_TYPE", "User story").strip() or "User story",
         miro_base_url=_require(values, "MIRO_BASE_URL").rstrip("/"),
-        miro_access_token=_require(values, "MIRO_ACCESS_TOKEN"),
+        miro_access_token=values.get("MIRO_ACCESS_TOKEN", "").strip(),
+        miro_client_id=values.get("MIRO_CLIENT_ID", "").strip(),
+        miro_client_secret=values.get("MIRO_CLIENT_SECRET", "").strip(),
+        miro_oauth_redirect_uri=values.get(
+            "MIRO_OAUTH_REDIRECT_URI",
+            f"{values.get('MIRO_APP_PUBLIC_URL', 'http://localhost:8787').strip().rstrip('/')}/api/oauth/callback",
+        ).strip(),
         miro_board_id=_require(values, "MIRO_BOARD_ID"),
         app_public_url=values.get("MIRO_APP_PUBLIC_URL", "http://localhost:8787").strip().rstrip("/"),
         backend_host=values.get("APP_BACKEND_HOST", "127.0.0.1").strip() or "127.0.0.1",

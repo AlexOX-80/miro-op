@@ -11,6 +11,9 @@ Deploye das Repo nach Vercel. Danach setze in Vercel mindestens diese Environmen
 - `OPENPROJECT_STORY_TYPE`
 - `MIRO_BASE_URL`
 - `MIRO_ACCESS_TOKEN`
+- `MIRO_CLIENT_ID`
+- `MIRO_CLIENT_SECRET`
+- `MIRO_OAUTH_REDIRECT_URI`
 - `MIRO_BOARD_ID`
 - `MIRO_APP_PUBLIC_URL`
 - `APP_DATA_FILE`
@@ -34,6 +37,7 @@ Typische Werte:
 - App URL: `https://<deine-domain>/`
 - Modal fuer Connect: `https://<deine-domain>/connect.html`
 - Modal fuer Open: `https://<deine-domain>/modal.html`
+- OAuth Redirect URI: `https://<deine-domain>/api/oauth/callback`
 
 ## Benoetigte Frontend-Einstiege
 
