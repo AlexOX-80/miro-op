@@ -4,6 +4,7 @@ const createVersionButton = document.querySelector("#create-version-board");
 const reloadVersionsButton = document.querySelector("#reload-versions");
 const versionSelectNode = document.querySelector("#version-select");
 const authButton = document.querySelector("#auth-button");
+const choiceButton = document.querySelector("#choice-button");
 const statusActionsNode = document.querySelector("#status-actions");
 const debugToggleButton = document.querySelector("#toggle-debug");
 
@@ -59,11 +60,48 @@ const LANE_CONFIGS = [
 let currentBoardId = "";
 let appConfig = null;
 const moveSyncByCardId = new Map();
+const suppressStatusSyncUntilByCardId = new Map();
+const statusChoiceModalOpenByCardId = new Set();
 let debugEnabled = false;
 const debugLines = [];
+let pendingStatusChoice = null;
 
 function setStatus(message) {
   statusNode.textContent = message || "";
+}
+
+function refreshStatusActionsVisibility() {
+  const hasVisibleAction =
+    (authButton && !authButton.hidden) ||
+    (choiceButton && !choiceButton.hidden);
+  statusActionsNode.hidden = !hasVisibleAction;
+}
+
+function setAuthButtonVisible(visible) {
+  if (!authButton) {
+    return;
+  }
+  authButton.hidden = !visible;
+  refreshStatusActionsVisibility();
+}
+
+function clearPendingStatusChoice() {
+  pendingStatusChoice = null;
+  if (choiceButton) {
+    choiceButton.hidden = true;
+  }
+  refreshStatusActionsVisibility();
+}
+
+function setPendingStatusChoice(choice) {
+  pendingStatusChoice = choice;
+  if (choice?.appCardId) {
+    suppressStatusSyncUntilByCardId.set(String(choice.appCardId), Date.now() + 4000);
+  }
+  if (choiceButton) {
+    choiceButton.hidden = false;
+  }
+  refreshStatusActionsVisibility();
 }
 
 function setDebugState(enabled) {
@@ -87,7 +125,8 @@ function debugStatus(message) {
 
 function clearStatus() {
   statusNode.textContent = "";
-  statusActionsNode.hidden = true;
+  clearPendingStatusChoice();
+  setAuthButtonVisible(false);
 }
 
 function clearOauthStatusIfPresent() {
@@ -99,7 +138,7 @@ function clearOauthStatusIfPresent() {
   ) {
     clearStatus();
   } else {
-    statusActionsNode.hidden = true;
+    setAuthButtonVisible(false);
   }
 }
 
@@ -183,37 +222,95 @@ function errorMessageFromPayload(payload) {
   return payload.message || payload.error || JSON.stringify(payload);
 }
 
-function showErrorDialog(message) {
+function normalizeDialogChoiceResult(value) {
+  if (typeof value === "string") {
+    return value.trim();
+  }
+  if (!value || typeof value !== "object") {
+    return "";
+  }
+  const candidates = [value.value, value.result, value.selected, value.statusName, value.choice];
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+  return "";
+}
+
+async function showErrorDialog(message) {
   const text = String(message || "Unbekannter Fehler.");
   setStatus(text);
   if (!appConfig) {
     return Promise.resolve();
   }
-  return miro.board.ui.openModal({
-    url: `${appConfig.appPublicUrl}/dialog.html?kind=error`,
-    width: 440,
-    data: {
-      kind: "error",
-      title: "OpenProject-Fehler",
-      message: text,
-    },
-  });
+  try {
+    const modal = await miro.board.ui.openModal({
+      url: `${appConfig.appPublicUrl}/dialog.html?kind=error`,
+      width: 440,
+      data: {
+        kind: "error",
+        title: "OpenProject-Fehler",
+        message: text,
+      },
+    });
+    return modal.waitForClose();
+  } catch (error) {
+    const modalError = error instanceof Error ? error.message : String(error);
+    debugStatus(`Fehlerdialog konnte nicht geoeffnet werden: ${modalError}`);
+    return null;
+  }
 }
 
-async function chooseStatusDialog(lane, matchingCandidates) {
+async function chooseStatusDialog(lane, matchingCandidates, appCardId = "") {
   if (!appConfig) {
     return matchingCandidates[0] || null;
   }
-  return miro.board.ui.openModal({
-    url: `${appConfig.appPublicUrl}/dialog.html?kind=choice`,
-    width: 480,
-    data: {
-      kind: "choice",
-      title: "OpenProject-Status waehlen",
-      message: `Fuer die Spalte "${lane.label}" gibt es mehrere moegliche OpenProject-Statuswerte.`,
-      options: matchingCandidates,
-    },
-  });
+  const key = String(appCardId || "");
+  if (key) {
+    statusChoiceModalOpenByCardId.add(key);
+  }
+  try {
+    const modal = await miro.board.ui.openModal({
+      url: `${appConfig.appPublicUrl}/dialog.html?kind=choice`,
+      width: 480,
+      data: {
+        kind: "choice",
+        title: "OpenProject-Status waehlen",
+        message: `Fuer die Spalte "${lane.label}" gibt es mehrere moegliche OpenProject-Statuswerte.`,
+        options: matchingCandidates,
+      },
+    });
+    const result = await modal.waitForClose();
+    if (key && result) {
+      suppressStatusSyncUntilByCardId.set(key, Date.now() + 4000);
+    }
+    return normalizeDialogChoiceResult(result);
+  } finally {
+    if (key) {
+      statusChoiceModalOpenByCardId.delete(key);
+    }
+  }
+}
+
+async function openPendingStatusChoiceDialog() {
+  if (!pendingStatusChoice) {
+    return null;
+  }
+  const { lane, matchingCandidates, appCardId } = pendingStatusChoice;
+  const result = await chooseStatusDialog(lane, matchingCandidates, appCardId);
+  return result;
+}
+
+async function applyStatusChange(appCardId, targetStatus, fallbackWorkPackageId = null) {
+  const boardCard = await miro.board.getById(appCardId);
+  const payload = await patchCardStatus(appCardId, targetStatus, fallbackWorkPackageId);
+  if (boardCard) {
+    await applyConnectedCardPayload(boardCard, payload);
+  }
+  suppressStatusSyncUntilByCardId.set(String(appCardId), Date.now() + 4000);
+  clearPendingStatusChoice();
+  setStatus(`OpenProject-Status fuer Karte ${appCardId} auf "${targetStatus}" aktualisiert.`);
 }
 
 async function appFetch(url, options = {}) {
@@ -362,7 +459,7 @@ function laneForCardPosition(card, frame) {
   return null;
 }
 
-async function promptForTargetStatus(lane, allowedStatuses) {
+async function promptForTargetStatus(lane, allowedStatuses, deferredChoice = null) {
   const allowedNormalized = new Set((allowedStatuses || []).map(normalizeStatus));
   const matchingCandidates = lane.statuses.filter(
     (candidate) => allowedNormalized.size === 0 || allowedNormalized.has(normalizeStatus(candidate))
@@ -379,7 +476,20 @@ async function promptForTargetStatus(lane, allowedStatuses) {
   if (matchingCandidates.length === 1) {
     return matchingCandidates[0];
   }
-  return chooseStatusDialog(lane, matchingCandidates);
+  const deferredCardId = String(deferredChoice?.appCardId || "");
+  try {
+    return await chooseStatusDialog(lane, matchingCandidates, deferredCardId);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes("There is already a modal open")) {
+      setPendingStatusChoice({ lane, matchingCandidates, ...deferredChoice });
+      setStatus(
+        `Fuer die Spalte "${lane.label}" ist eine Statuswahl noetig. Schliesse zuerst das offene Miro-Modal und klicke dann auf "Status waehlen".`
+      );
+      return null;
+    }
+    throw error;
+  }
 }
 
 async function handlePotentialStatusChange(item) {
@@ -388,6 +498,19 @@ async function handlePotentialStatusChange(item) {
   }
 
   const appCardId = String(item.id || "");
+  const suppressUntil = suppressStatusSyncUntilByCardId.get(appCardId) || 0;
+  if (appCardId && suppressUntil > Date.now()) {
+    debugStatus(`Ignoriere Card ${appCardId}, weil der Statuswechsel gerade noch entprellt wird.`);
+    return;
+  }
+  if (appCardId && statusChoiceModalOpenByCardId.has(appCardId)) {
+    debugStatus(`Ignoriere Card ${appCardId}, weil fuer diese Karte bereits ein Statuswahl-Dialog offen ist.`);
+    return;
+  }
+  if (pendingStatusChoice?.appCardId && String(pendingStatusChoice.appCardId) === appCardId) {
+    debugStatus(`Ignoriere Card ${appCardId}, weil bereits eine Statuswahl aussteht.`);
+    return;
+  }
   if (!appCardId || moveSyncByCardId.has(appCardId)) {
     if (appCardId && moveSyncByCardId.has(appCardId)) {
       debugStatus(`Ignoriere Card ${appCardId}, weil bereits ein Sync laeuft.`);
@@ -445,17 +568,18 @@ async function handlePotentialStatusChange(item) {
     debugStatus(
       `Erlaubte Zielstatus fuer Card ${appCardId}: ${allowedStatuses.length ? allowedStatuses.join(", ") : "keine"}.`
     );
-    const targetStatus = await promptForTargetStatus(lane, allowedStatuses);
+    const targetStatus = await promptForTargetStatus(lane, allowedStatuses, {
+      appCardId,
+      fallbackWorkPackageId,
+    });
     if (!targetStatus) {
-      setStatus(`Statuswechsel fuer Karte ${appCardId} abgebrochen.`);
+      debugStatus(`Kein Zielstatus fuer Card ${appCardId} gewaehlt.`);
       return;
     }
     debugStatus(`Ausgewaehlter Zielstatus fuer Card ${appCardId}: "${targetStatus}".`);
 
     try {
-      const payload = await patchCardStatus(appCardId, targetStatus, fallbackWorkPackageId);
-      await applyConnectedCardPayload(boardCard, payload);
-      setStatus(`OpenProject-Status fuer Karte ${appCardId} auf "${targetStatus}" aktualisiert.`);
+      await applyStatusChange(appCardId, targetStatus, fallbackWorkPackageId);
     } catch (error) {
       await showErrorDialog(error instanceof Error ? error.message : String(error));
     }
@@ -485,8 +609,20 @@ function extractUpdatedItems(event) {
 
 async function handleItemsUpdate(event) {
   const items = extractUpdatedItems(event);
-  debugStatus(`experimental:items:update empfangen mit ${items.length} Item(s).`);
+  const uniqueItems = [];
+  const seenIds = new Set();
   for (const item of items) {
+    const id = String(item?.id || "");
+    if (!id || seenIds.has(id)) {
+      continue;
+    }
+    seenIds.add(id);
+    uniqueItems.push(item);
+  }
+  debugStatus(
+    `experimental:items:update empfangen mit ${items.length} Item(s), ${uniqueItems.length} eindeutig.`
+  );
+  for (const item of uniqueItems) {
     try {
       await handlePotentialStatusChange(item);
     } catch (error) {
@@ -774,7 +910,7 @@ function setAuthUi(hasUsableToken) {
   createVersionButton.disabled = !hasUsableToken || versionSelectNode.disabled;
   if (!hasUsableToken) {
     setStatus("Miro OAuth fehlt noch. Fuer verknuepfte Karten bitte zuerst verbinden.");
-    statusActionsNode.hidden = false;
+    setAuthButtonVisible(true);
     return;
   }
   clearOauthStatusIfPresent();
@@ -784,7 +920,7 @@ async function startOauthFlow(config) {
   clearStatus();
   authButton.disabled = true;
   statusNode.textContent = "OAuth-Fenster wird geoeffnet ...";
-  statusActionsNode.hidden = false;
+  setAuthButtonVisible(true);
 
   try {
     const popup = window.open(config.oauthStartUrl, "_blank", "noopener,noreferrer,width=700,height=800");
@@ -811,7 +947,6 @@ async function startOauthFlow(config) {
 async function bootstrap() {
   appConfig = await fetchConfig();
   await resolveCurrentBoardId();
-  await registerAppCardEvents(appConfig);
   await loadRecentVersions();
   const oauthStatus = await fetchOauthStatus(appConfig, currentBoardId);
   setAuthUi(oauthStatus.hasUsableToken);
@@ -852,6 +987,25 @@ async function bootstrap() {
       setStatus(error instanceof Error ? error.message : String(error));
     }
   });
+
+  if (choiceButton) {
+    choiceButton.addEventListener("click", async () => {
+      try {
+        const targetStatus = await openPendingStatusChoiceDialog();
+        if (targetStatus) {
+          const { appCardId, fallbackWorkPackageId } = pendingStatusChoice || {};
+          if (!appCardId) {
+            clearPendingStatusChoice();
+            setStatus(`Status "${targetStatus}" ausgewaehlt.`);
+            return;
+          }
+          await applyStatusChange(appCardId, targetStatus, fallbackWorkPackageId);
+        }
+      } catch (error) {
+        await showErrorDialog(error instanceof Error ? error.message : String(error));
+      }
+    });
+  }
 
   if (debugToggleButton) {
     setDebugState(false);

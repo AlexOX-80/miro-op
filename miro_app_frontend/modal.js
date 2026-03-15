@@ -7,6 +7,8 @@ const metaNode = document.querySelector("#meta");
 const descriptionNode = document.querySelector("#description");
 const linkNode = document.querySelector("#story-link");
 const statusNode = document.querySelector("#modal-status");
+const syncStatusNode = document.querySelector("#sync-status");
+const statusSyncButton = document.querySelector("#status-sync-button");
 const refreshButton = document.querySelector("#refresh-button");
 const fieldListNode = document.querySelector("#field-list");
 const commentListNode = document.querySelector("#comment-list");
@@ -19,12 +21,61 @@ const viewNodes = Array.from(document.querySelectorAll("[data-view]"));
 let currentPayload = null;
 let currentBoardId = "";
 
+const LANE_WIDTH = 360;
+const FRAME_PADDING_X = 40;
+const SYNC_ERROR_FIELD_VALUE = "Sync-Fehler";
+const LANE_CONFIGS = [
+  { id: "sprint-backlog", label: "Sprint Backlog", statuses: ["Offen", "Neu", "priorisiert", "Ready"] },
+  { id: "refinement", label: "refinement noetig", statuses: ["Abklaeren", "Abklären"] },
+  { id: "blocked", label: "Geblockt", statuses: ["Geblockt"] },
+  { id: "in-work", label: "in Arbeit", statuses: ["in Arbeit"] },
+  { id: "test", label: "im Test", statuses: ["Testbereit TEST", "Im Test", "Testbereit PROD"] },
+  { id: "closed", label: "geschlossen", statuses: ["Geschlossen", "Abgelehnt"] },
+];
+
 function setStatus(message) {
   statusNode.textContent = message || "";
 }
 
+function setSyncStatus(message) {
+  syncStatusNode.textContent = message || "";
+}
+
 function setCommentStatus(message) {
   commentStatusNode.textContent = message || "";
+}
+
+function normalizeStatus(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+}
+
+function laneConfigForStatus(statusName) {
+  const normalized = normalizeStatus(statusName);
+  return (
+    LANE_CONFIGS.find((lane) =>
+      lane.statuses.some((candidate) => normalizeStatus(candidate) === normalized)
+    ) || null
+  );
+}
+
+function normalizeDialogChoiceResult(value) {
+  if (typeof value === "string") {
+    return value.trim();
+  }
+  if (!value || typeof value !== "object") {
+    return "";
+  }
+  const candidates = [value.value, value.result, value.selected, value.statusName, value.choice];
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+  return "";
 }
 
 function getOauthToken() {
@@ -132,6 +183,58 @@ async function loadComments() {
   }
   return response.json();
 }
+
+async function patchCardStatus(statusName, fallbackWorkPackageId = null) {
+  const params = new URLSearchParams();
+  params.set("board_id", await resolveCurrentBoardId());
+  params.set("action", "status");
+  if (fallbackWorkPackageId) {
+    params.set("work_package_id", String(fallbackWorkPackageId));
+  } else {
+    const cache = getStoryCache();
+    if (cache?.workPackageId) {
+      params.set("work_package_id", String(cache.workPackageId));
+    }
+  }
+  const response = await apiFetch(`/api/app-cards/${encodeURIComponent(appCardId)}/refresh?${params.toString()}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ statusName }),
+  });
+  if (!response.ok) {
+    throw new Error(await readError(response, "Statuswechsel fehlgeschlagen."));
+  }
+  return response.json();
+}
+
+async function showChoiceDialog(lane, options) {
+  const modal = await miro.board.ui.openModal({
+    url: "/dialog.html?kind=choice",
+    width: 480,
+    data: {
+      kind: "choice",
+      title: "OpenProject-Status waehlen",
+      message: `Fuer die Spalte "${lane.label}" gibt es mehrere moegliche OpenProject-Statuswerte.`,
+      options,
+    },
+  });
+  const result = await modal.waitForClose();
+  return normalizeDialogChoiceResult(result);
+}
+
+async function showErrorDialog(message) {
+  const modal = await miro.board.ui.openModal({
+    url: "/dialog.html?kind=error",
+    width: 440,
+    data: {
+      kind: "error",
+      title: "OpenProject-Fehler",
+      message: String(message || "Unbekannter Fehler."),
+    },
+  });
+  return modal.waitForClose();
+}
+
 
 function parseDescriptionValue(description, prefix) {
   if (typeof description !== "string") {
@@ -340,6 +443,122 @@ function createPropertyRow(label, value, options = {}) {
   return row;
 }
 
+function laneForCardPosition(card, frame) {
+  const frameLeft = frame.x - frame.width / 2;
+  const candidates = [{ x: card.x }, { x: card.x - frameLeft }];
+
+  for (const candidate of candidates) {
+    const relativeX = candidate.x - FRAME_PADDING_X;
+    const laneIndex = Math.floor(relativeX / LANE_WIDTH);
+    if (laneIndex >= 0 && laneIndex < LANE_CONFIGS.length) {
+      return LANE_CONFIGS[laneIndex];
+    }
+  }
+  return null;
+}
+
+function withoutSyncErrorField(fields) {
+  return (Array.isArray(fields) ? fields : []).filter((field) => String(field?.value || "") !== SYNC_ERROR_FIELD_VALUE);
+}
+
+async function setCardSyncError(message) {
+  const boardCard = await miro.board.getById(appCardId);
+  if (!boardCard) {
+    return;
+  }
+  const fields = withoutSyncErrorField(boardCard.fields);
+  fields.unshift({
+    value: SYNC_ERROR_FIELD_VALUE,
+    fillColor: "#ffe3e3",
+    textColor: "#9c2c2c",
+    tooltip: String(message || "Statuswechsel fehlgeschlagen."),
+  });
+  boardCard.fields = fields.slice(0, 20);
+  await boardCard.sync();
+}
+
+async function applyConnectedCardPayloadToBoard(payload) {
+  const boardCard = await miro.board.getById(appCardId);
+  if (!boardCard) {
+    return;
+  }
+  const appCardData = payload?.appCard?.data || {};
+  if (appCardData.title) {
+    boardCard.title = appCardData.title;
+  }
+  if (typeof appCardData.description === "string") {
+    boardCard.description = appCardData.description;
+  }
+  if (Array.isArray(appCardData.fields)) {
+    boardCard.fields = withoutSyncErrorField(appCardData.fields);
+  }
+  boardCard.status = "connected";
+  await boardCard.sync();
+}
+
+async function syncStatusFromPosition() {
+  const boardCard = await miro.board.getById(appCardId);
+  if (!boardCard || boardCard.type !== "app_card") {
+    throw new Error("Die aktuelle Karte konnte nicht geladen werden.");
+  }
+  if (boardCard.status !== "connected") {
+    throw new Error("Diese Karte ist noch nicht mit einer OpenProject-Story verbunden.");
+  }
+
+  const parentId = boardCard.parentId || boardCard.parent?.id;
+  if (!parentId) {
+    throw new Error("Die Karte liegt nicht in einem Versions-Frame.");
+  }
+
+  const frame = await miro.board.getById(parentId);
+  if (!frame || frame.type !== "frame") {
+    throw new Error("Der Parent der Karte ist kein gueltiger Frame.");
+  }
+
+  const lane = laneForCardPosition(boardCard, frame);
+  if (!lane) {
+    throw new Error("Aus der aktuellen Kartenposition konnte keine Lane ermittelt werden.");
+  }
+
+  const fallbackWorkPackageId = getStoryCache()?.workPackageId || null;
+  const connection = await loadConnection();
+  const currentStatus = connection?.story?.statusName || "";
+  const currentLane = laneConfigForStatus(currentStatus);
+  if (currentLane && currentLane.id === lane.id) {
+    setSyncStatus(`Die Karte liegt bereits in der passenden Spalte "${lane.label}".`);
+    return;
+  }
+
+  const allowedStatuses = connection.allowedStatusTransitions || [];
+  const allowedNormalized = new Set(allowedStatuses.map(normalizeStatus));
+  const matchingCandidates = lane.statuses.filter(
+    (candidate) => allowedNormalized.size === 0 || allowedNormalized.has(normalizeStatus(candidate))
+  );
+
+  if (!matchingCandidates.length) {
+    throw new Error(
+      `OpenProject erlaubt keinen Wechsel in die Spalte "${lane.label}". Erlaubt sind: ${
+        allowedStatuses.length ? allowedStatuses.join(", ") : "keine"
+      }.`
+    );
+  }
+
+  let targetStatus = matchingCandidates[0];
+  if (matchingCandidates.length > 1) {
+    targetStatus = await showChoiceDialog(lane, matchingCandidates);
+  }
+  if (!targetStatus) {
+    setSyncStatus("Statuswechsel nicht ausgefuehrt, weil keine Auswahl bestaetigt wurde.");
+    return;
+  }
+
+  const payload = await patchCardStatus(targetStatus, fallbackWorkPackageId);
+  await applyConnectedCardPayloadToBoard(payload);
+  const commentsPayload = await loadComments().catch(() => ({ items: currentPayload?.comments || [] }));
+  renderStory({ ...payload, comments: commentsPayload.items || [] });
+  setSyncStatus(`OpenProject-Status auf "${targetStatus}" aktualisiert.`);
+}
+
 function renderMeta(story) {
   metaNode.innerHTML = "";
   [
@@ -482,6 +701,18 @@ refreshButton.addEventListener("click", async () => {
     await refresh();
   } catch (error) {
     setStatus(error instanceof Error ? error.message : String(error));
+  }
+});
+
+statusSyncButton.addEventListener("click", async () => {
+  try {
+    setSyncStatus("Statuswechsel wird geprueft ...");
+    await syncStatusFromPosition();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await setCardSyncError(message);
+    setSyncStatus(message);
+    await showErrorDialog(message);
   }
 });
 

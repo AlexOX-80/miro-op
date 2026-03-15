@@ -135,6 +135,11 @@ body.opm-panel {
   border-top: 1px solid var(--indigo100);
 }
 
+.opm-actions {
+  display: grid;
+  gap: 8px;
+}
+
 .opm-props {
   border-top: 1px solid var(--indigo100);
 }
