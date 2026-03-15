@@ -11,17 +11,23 @@
     <main class="shell">
       <section class="panel">
         <header class="panel-head">
-          <span class="eyebrow">Developer Console</span>
+          <span class="eyebrow">Setup</span>
           <h1>Miro App Setup</h1>
-          <p class="lead">Diese Seite fasst die URLs und Assets zusammen, die du in der Miro Developer Console brauchst.</p>
+          <p class="lead">Diese Seite fasst die URLs, OAuth-Infos und Icon-Downloads fuer die Miro Developer Console zusammen.</p>
         </header>
         <div class="panel-body">
           <div class="surface">
+            <h2 class="heading heading-small setup-heading">Developer Console</h2>
             <dl class="grid" id="setup-grid"></dl>
           </div>
+          <div class="surface">
+            <h2 class="heading heading-small setup-heading">OAuth Status</h2>
+            <p class="subtle setup-subtle">Aktueller Setup-/OAuth-Status als JSON aus <code>/api/setup</code>.</p>
+            <pre class="setup-json" id="setup-auth-json"></pre>
+          </div>
           <section class="icon-section">
-            <h2>Icons</h2>
-            <p class="lead">Lade diese SVGs in der Miro Developer Console als Kontur- und Farbsymbol hoch.</p>
+            <h2 class="heading heading-small">Icons</h2>
+            <p class="subtle">Lade diese SVGs in der Miro Developer Console als Kontur- und Farbsymbol hoch.</p>
             <div class="icon-grid" id="icon-grid"></div>
           </section>
         </div>

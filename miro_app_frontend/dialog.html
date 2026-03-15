@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8">
+    <title>OpenProject Dialog</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="/vendor/mirotone.css">
+    <link rel="stylesheet" href="/styles.css">
+    <script src="https://miro.com/app/static/sdk/v2/miro.js"></script>
+  </head>
+  <body>
+    <main class="shell">
+      <section class="panel panel-compact">
+        <div class="panel-body">
+          <section class="surface app-dialog">
+            <div class="app-dialog-head">
+              <h3 class="heading heading-small" id="dialog-title"></h3>
+              <p class="subtle" id="dialog-message"></p>
+            </div>
+            <div class="app-dialog-body" id="dialog-body"></div>
+            <div class="app-dialog-actions" id="dialog-actions"></div>
+          </section>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="/dialog.js"></script>
+  </body>
+</html>

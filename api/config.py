@@ -14,7 +14,7 @@ def app(environ, start_response):
             "versionName": settings.openproject_version_name,
             "appPublicUrl": settings.app_public_url,
             "oauthStartUrl": f"{settings.app_public_url}/api/oauth/start",
-            "oauthStatusUrl": f"{settings.app_public_url}/api/oauth/status",
+            "oauthStatusUrl": f"{settings.app_public_url}/api/setup",
             "statuses": service.list_all_statuses(),
         },
     )

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
-from ._lib import build_service, json_response
+from ._lib import build_service, get_cookie, json_response, query_param
 
 
 def app(environ, start_response):
-    service = build_service()
+    service = build_service(environ=environ)
     settings = service.settings
+    board_id = query_param(environ, "board_id")
+    oauth_status = service.oauth_status()
+    has_valid_token = service.has_valid_miro_token(board_id)
     return json_response(
         start_response,
         200,
@@ -16,9 +19,15 @@ def app(environ, start_response):
             "healthUrl": f"{settings.app_public_url}/api/health",
             "storiesApiUrl": f"{settings.app_public_url}/api/stories",
             "oauthStartUrl": f"{settings.app_public_url}/api/oauth/start",
-            "oauthStatusUrl": f"{settings.app_public_url}/api/oauth/status",
+            "oauthStatusUrl": f"{settings.app_public_url}/api/setup",
             "oauthRedirectUri": settings.miro_oauth_redirect_uri,
-            "boardId": settings.miro_board_id,
+            "hasStoredToken": oauth_status["hasStoredToken"],
+            "hasFallbackToken": oauth_status["hasFallbackToken"],
+            "redirectUri": oauth_status["redirectUri"],
+            "hasHeaderToken": bool(environ.get("HTTP_X_MIRO_OAUTH_TOKEN")),
+            "hasCookieToken": bool(get_cookie(environ, "miro_oauth_token")),
+            "hasValidToken": has_valid_token,
+            "hasUsableToken": has_valid_token,
             "icons": [
                 {
                     "label": "Kontursymbol",

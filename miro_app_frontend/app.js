@@ -5,7 +5,7 @@ const reloadVersionsButton = document.querySelector("#reload-versions");
 const versionSelectNode = document.querySelector("#version-select");
 const authButton = document.querySelector("#auth-button");
 const statusActionsNode = document.querySelector("#status-actions");
-let currentBoardId = "";
+const debugToggleButton = document.querySelector("#toggle-debug");
 
 const CARD_WIDTH = 320;
 const CARD_HEIGHT = 180;
@@ -16,23 +16,73 @@ const FRAME_PADDING_Y = 48;
 const FRAME_TITLE_SPACE = 84;
 const LANE_HEADER_HEIGHT = 44;
 const LANE_INNER_PADDING_Y = 18;
-const KANBAN_STATUS_ORDER = [
-  "neu",
-  "new",
-  "abklären",
-  "abklaeren",
-  "priorisiert",
-  "ready",
-  "in progress",
-  "in bearbeitung",
-  "done",
-  "closed",
-  "erledigt",
-  "abgenommen",
+
+const LANE_CONFIGS = [
+  {
+    id: "sprint-backlog",
+    label: "Sprint Backlog",
+    statuses: ["Offen", "Neu", "priorisiert", "Ready"],
+    fillColor: "#f2f4fc",
+  },
+  {
+    id: "refinement",
+    label: "refinement nötig",
+    statuses: ["Abklären"],
+    fillColor: "#fff9e3",
+  },
+  {
+    id: "blocked",
+    label: "Geblockt",
+    statuses: ["Geblockt"],
+    fillColor: "#ffe3e3",
+  },
+  {
+    id: "in-work",
+    label: "in Arbeit",
+    statuses: ["in Arbeit"],
+    fillColor: "#fff9e3",
+  },
+  {
+    id: "test",
+    label: "im Test",
+    statuses: ["Testbereit TEST", "Im Test", "Testbereit PROD"],
+    fillColor: "#e7f5ff",
+  },
+  {
+    id: "closed",
+    label: "geschlossen",
+    statuses: ["Geschlossen", "Abgelehnt"],
+    fillColor: "#eaf6e6",
+  },
 ];
 
+let currentBoardId = "";
+let appConfig = null;
+const moveSyncByCardId = new Map();
+let debugEnabled = false;
+const debugLines = [];
+
 function setStatus(message) {
-  statusNode.textContent = message;
+  statusNode.textContent = message || "";
+}
+
+function setDebugState(enabled) {
+  debugEnabled = Boolean(enabled);
+  debugLines.length = 0;
+  if (debugToggleButton) {
+    debugToggleButton.textContent = debugEnabled ? "Debug an" : "Debug aus";
+  }
+}
+
+function debugStatus(message) {
+  if (!debugEnabled) {
+    return;
+  }
+  debugLines.push(String(message));
+  while (debugLines.length > 10) {
+    debugLines.shift();
+  }
+  setStatus(debugLines.map((line) => `[DEBUG] ${line}`).join("\n"));
 }
 
 function clearStatus() {
@@ -70,36 +120,100 @@ function escapeHtml(value) {
     .replaceAll("'", "&#39;");
 }
 
-function normalizeStatus(status) {
-  return String(status || "").trim().toLowerCase();
+function normalizeStatus(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
 }
 
-function statusSortValue(status) {
-  const index = KANBAN_STATUS_ORDER.indexOf(normalizeStatus(status));
-  return index === -1 ? Number.MAX_SAFE_INTEGER : index;
+function laneConfigForStatus(statusName) {
+  const normalized = normalizeStatus(statusName);
+  return (
+    LANE_CONFIGS.find((lane) =>
+      lane.statuses.some((candidate) => normalizeStatus(candidate) === normalized)
+    ) || null
+  );
 }
 
-function compareStatuses(left, right) {
-  const leftOrder = statusSortValue(left);
-  const rightOrder = statusSortValue(right);
-  if (leftOrder !== rightOrder) {
-    return leftOrder - rightOrder;
-  }
-  return String(left).localeCompare(String(right), "de");
+function getUnmappedStatuses(statuses) {
+  return (statuses || []).filter((status) => !laneConfigForStatus(status));
 }
 
-function laneFillColor(status) {
-  const normalized = normalizeStatus(status);
-  if (["neu", "new", "ready"].includes(normalized)) {
-    return "#f2f4fc";
+function laneConfigById(laneId) {
+  return LANE_CONFIGS.find((lane) => lane.id === laneId) || null;
+}
+
+function laneIndexById(laneId) {
+  return LANE_CONFIGS.findIndex((lane) => lane.id === laneId);
+}
+
+function laneFillColor(laneId) {
+  return laneConfigById(laneId)?.fillColor || "#f6f7f9";
+}
+
+function laneHeaderContent(lane) {
+  const statuses = lane.statuses.map((status) => escapeHtml(status)).join(" · ");
+  return `<p><strong>${escapeHtml(lane.label)}</strong></p><p><small>${statuses}</small></p>`;
+}
+
+function readStoryIdFromDescription(description) {
+  if (typeof description !== "string") {
+    return null;
   }
-  if (["abklären", "abklaeren", "priorisiert", "in progress", "in bearbeitung"].includes(normalized)) {
-    return "#fff9e3";
+  for (const line of description.split("\n")) {
+    if (line.startsWith("OpenProject ID:")) {
+      const value = line.slice("OpenProject ID:".length).trim();
+      if (/^\d+$/.test(value)) {
+        return Number(value);
+      }
+    }
   }
-  if (["done", "closed", "erledigt", "abgenommen"].includes(normalized)) {
-    return "#eaf6e6";
+  return null;
+}
+
+function errorMessageFromPayload(payload) {
+  if (!payload) {
+    return "Unbekannter Fehler.";
   }
-  return "#f6f7f9";
+  if (typeof payload === "string") {
+    return payload;
+  }
+  return payload.message || payload.error || JSON.stringify(payload);
+}
+
+function showErrorDialog(message) {
+  const text = String(message || "Unbekannter Fehler.");
+  setStatus(text);
+  if (!appConfig) {
+    return Promise.resolve();
+  }
+  return miro.board.ui.openModal({
+    url: `${appConfig.appPublicUrl}/dialog.html?kind=error`,
+    width: 440,
+    data: {
+      kind: "error",
+      title: "OpenProject-Fehler",
+      message: text,
+    },
+  });
+}
+
+async function chooseStatusDialog(lane, matchingCandidates) {
+  if (!appConfig) {
+    return matchingCandidates[0] || null;
+  }
+  return miro.board.ui.openModal({
+    url: `${appConfig.appPublicUrl}/dialog.html?kind=choice`,
+    width: 480,
+    data: {
+      kind: "choice",
+      title: "OpenProject-Status waehlen",
+      message: `Fuer die Spalte "${lane.label}" gibt es mehrere moegliche OpenProject-Statuswerte.`,
+      options: matchingCandidates,
+    },
+  });
 }
 
 async function appFetch(url, options = {}) {
@@ -123,20 +237,16 @@ async function resolveCurrentBoardId() {
   if (currentBoardId) {
     return currentBoardId;
   }
-
   if (typeof miro?.board?.getInfo === "function") {
     const info = await miro.board.getInfo();
     currentBoardId = String(info?.id || "").trim();
   }
-
   if (!currentBoardId && miro?.board?.info?.id) {
     currentBoardId = String(miro.board.info.id).trim();
   }
-
   if (!currentBoardId) {
     throw new Error("Aktuelle Miro-Board-ID konnte nicht ermittelt werden.");
   }
-
   return currentBoardId;
 }
 
@@ -157,6 +267,234 @@ async function fetchJson(url, options = {}) {
   return response.json();
 }
 
+async function fetchCardConnection(appCardId, fallbackWorkPackageId = null) {
+  const boardId = await resolveCurrentBoardId();
+  const query = new URLSearchParams({ board_id: boardId });
+  if (fallbackWorkPackageId) {
+    query.set("work_package_id", String(fallbackWorkPackageId));
+  }
+  debugStatus(`Lade Verbindung fuer Card ${appCardId} auf Board ${boardId}.`);
+  return fetchJson(`/api/app-cards/${encodeURIComponent(appCardId)}?${query.toString()}`);
+}
+
+async function patchCardStatus(appCardId, statusName, fallbackWorkPackageId = null) {
+  const boardId = await resolveCurrentBoardId();
+  const query = new URLSearchParams({ board_id: boardId, action: "status" });
+  if (fallbackWorkPackageId) {
+    query.set("work_package_id", String(fallbackWorkPackageId));
+  }
+  debugStatus(`Sende Statuswechsel fuer Card ${appCardId} nach "${statusName}".`);
+  const response = await appFetch(`/api/app-cards/${encodeURIComponent(appCardId)}/refresh?${query.toString()}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ statusName }),
+  });
+
+  const text = await response.text();
+  let payload = {};
+  try {
+    payload = text ? JSON.parse(text) : {};
+  } catch {
+    payload = { error: text || "Unbekannter Fehler." };
+  }
+  if (!response.ok) {
+    throw new Error(errorMessageFromPayload(payload));
+  }
+  return payload;
+}
+
+function applyConnectedCardPayload(boardCard, payload) {
+  const appCardData = payload?.appCard?.data || {};
+  if (appCardData.title) {
+    boardCard.title = appCardData.title;
+  }
+  if (typeof appCardData.description === "string") {
+    boardCard.description = appCardData.description;
+  }
+  if (Array.isArray(appCardData.fields)) {
+    boardCard.fields = appCardData.fields;
+  }
+  boardCard.status = "connected";
+  return boardCard.sync();
+}
+
+function buildStoriesByLane(stories) {
+  const storiesByLaneId = new Map(LANE_CONFIGS.map((lane) => [lane.id, []]));
+  const unmappedStatuses = new Set();
+
+  for (const story of stories) {
+    const lane = laneConfigForStatus(story.statusName);
+    if (!lane) {
+      unmappedStatuses.add(story.statusName || "Ohne Status");
+      continue;
+    }
+    storiesByLaneId.get(lane.id).push(story);
+  }
+
+  return { storiesByLaneId, unmappedStatuses: Array.from(unmappedStatuses).sort((a, b) => a.localeCompare(b, "de")) };
+}
+
+function laneForCardPosition(card, frame) {
+  const frameLeft = frame.x - frame.width / 2;
+  const candidates = [
+    {
+      source: "parent_top_left",
+      x: card.x,
+    },
+    {
+      source: "canvas_center",
+      x: card.x - frameLeft,
+    },
+  ];
+
+  for (const candidate of candidates) {
+    const relativeX = candidate.x - FRAME_PADDING_X;
+    const laneIndex = Math.floor(relativeX / LANE_WIDTH);
+    if (laneIndex >= 0 && laneIndex < LANE_CONFIGS.length) {
+      return {
+        lane: LANE_CONFIGS[laneIndex],
+        source: candidate.source,
+        relativeX,
+        laneIndex,
+      };
+    }
+  }
+  return null;
+}
+
+async function promptForTargetStatus(lane, allowedStatuses) {
+  const allowedNormalized = new Set((allowedStatuses || []).map(normalizeStatus));
+  const matchingCandidates = lane.statuses.filter(
+    (candidate) => allowedNormalized.size === 0 || allowedNormalized.has(normalizeStatus(candidate))
+  );
+
+  if (matchingCandidates.length === 0) {
+    throw new Error(
+      `OpenProject erlaubt keinen Wechsel in die Spalte "${lane.label}". Erlaubt sind: ${
+        allowedStatuses.length ? allowedStatuses.join(", ") : "keine"
+      }.`
+    );
+  }
+
+  if (matchingCandidates.length === 1) {
+    return matchingCandidates[0];
+  }
+  return chooseStatusDialog(lane, matchingCandidates);
+}
+
+async function handlePotentialStatusChange(item) {
+  if (!item || item.type !== "app_card") {
+    return;
+  }
+
+  const appCardId = String(item.id || "");
+  if (!appCardId || moveSyncByCardId.has(appCardId)) {
+    if (appCardId && moveSyncByCardId.has(appCardId)) {
+      debugStatus(`Ignoriere Card ${appCardId}, weil bereits ein Sync laeuft.`);
+    }
+    return;
+  }
+
+  const syncPromise = (async () => {
+    debugStatus(`Move-Event fuer Card ${appCardId} empfangen.`);
+    const boardCard = await miro.board.getById(appCardId);
+    if (!boardCard || boardCard.status !== "connected") {
+      debugStatus(`Card ${appCardId} ist nicht verbunden oder konnte nicht geladen werden.`);
+      return;
+    }
+
+    const parentId = boardCard.parentId || boardCard.parent?.id;
+    if (!parentId) {
+      debugStatus(`Card ${appCardId} hat keinen Parent-Frame.`);
+      return;
+    }
+
+    const frame = await miro.board.getById(parentId);
+    if (!frame || frame.type !== "frame") {
+      debugStatus(`Parent ${parentId} von Card ${appCardId} ist kein Frame.`);
+      return;
+    }
+
+    debugStatus(
+      `Card ${appCardId} Position: x=${boardCard.x}, y=${boardCard.y}, relativeTo=${boardCard.relativeTo || "unknown"}, parent=${parentId}.`
+    );
+    const laneMatch = laneForCardPosition(boardCard, frame);
+    debugStatus(
+      `Card ${appCardId} Position: x=${boardCard.x}, y=${boardCard.y}, relativeTo=${boardCard.relativeTo || "unknown"}, parent=${parentId}, frameX=${frame.x}, frameWidth=${frame.width}.`
+    );
+    if (!laneMatch) {
+      debugStatus(`Lane-Berechnung fuer Card ${appCardId} schlug fehl.`);
+      return;
+    }
+    const lane = laneMatch.lane;
+    debugStatus(
+      `Lane fuer Card ${appCardId}: "${lane.label}" ueber ${laneMatch.source}, relativeX=${laneMatch.relativeX}, laneIndex=${laneMatch.laneIndex}.`
+    );
+
+    const fallbackWorkPackageId = readStoryIdFromDescription(boardCard.description);
+    const connection = await fetchCardConnection(appCardId, fallbackWorkPackageId);
+    const currentStatus = connection?.story?.statusName || "";
+    const currentLane = laneConfigForStatus(currentStatus);
+    debugStatus(`Aktueller OpenProject-Status fuer Card ${appCardId}: "${currentStatus || "unbekannt"}".`);
+    if (currentLane && currentLane.id === lane.id) {
+      debugStatus(`Card ${appCardId} ist bereits in der passenden Lane "${lane.label}".`);
+      return;
+    }
+
+    const allowedStatuses = connection.allowedStatusTransitions || [];
+    debugStatus(
+      `Erlaubte Zielstatus fuer Card ${appCardId}: ${allowedStatuses.length ? allowedStatuses.join(", ") : "keine"}.`
+    );
+    const targetStatus = await promptForTargetStatus(lane, allowedStatuses);
+    if (!targetStatus) {
+      setStatus(`Statuswechsel fuer Karte ${appCardId} abgebrochen.`);
+      return;
+    }
+    debugStatus(`Ausgewaehlter Zielstatus fuer Card ${appCardId}: "${targetStatus}".`);
+
+    try {
+      const payload = await patchCardStatus(appCardId, targetStatus, fallbackWorkPackageId);
+      await applyConnectedCardPayload(boardCard, payload);
+      setStatus(`OpenProject-Status fuer Karte ${appCardId} auf "${targetStatus}" aktualisiert.`);
+    } catch (error) {
+      await showErrorDialog(error instanceof Error ? error.message : String(error));
+    }
+  })().finally(() => {
+    moveSyncByCardId.delete(appCardId);
+  });
+
+  moveSyncByCardId.set(appCardId, syncPromise);
+  await syncPromise;
+}
+
+function extractUpdatedItems(event) {
+  if (Array.isArray(event)) {
+    return event;
+  }
+  if (Array.isArray(event?.items)) {
+    return event.items;
+  }
+  if (Array.isArray(event?.updated)) {
+    return event.updated;
+  }
+  if (event?.item) {
+    return [event.item];
+  }
+  return [];
+}
+
+async function handleItemsUpdate(event) {
+  const items = extractUpdatedItems(event);
+  debugStatus(`experimental:items:update empfangen mit ${items.length} Item(s).`);
+  for (const item of items) {
+    try {
+      await handlePotentialStatusChange(item);
+    } catch (error) {
+      await showErrorDialog(error instanceof Error ? error.message : String(error));
+    }
+  }
+}
+
 async function registerAppCardEvents(config) {
   miro.board.ui.on("icon:click", async () => {
     await miro.board.ui.openPanel({ url: `${config.appPublicUrl}/` });
@@ -171,6 +509,10 @@ async function registerAppCardEvents(config) {
     const url = `${config.appPublicUrl}/modal.html?appCardId=${encodeURIComponent(event.appCard.id)}`;
     await miro.board.ui.openPanel({ url });
   });
+
+  if (typeof miro?.board?.ui?.on === "function") {
+    miro.board.ui.on("experimental:items:update", handleItemsUpdate);
+  }
 }
 
 function createAppCardDataFromStory(story) {
@@ -313,19 +655,17 @@ async function createVersionFrameAndCards() {
     return;
   }
 
-  const viewport = await miro.board.viewport.get();
-  const storiesByStatus = new Map();
-  for (const story of stories) {
-    const statusName = story.statusName || "Ohne Status";
-    if (!storiesByStatus.has(statusName)) {
-      storiesByStatus.set(statusName, []);
-    }
-    storiesByStatus.get(statusName).push(story);
+  const { storiesByLaneId, unmappedStatuses } = buildStoriesByLane(stories);
+  if (unmappedStatuses.length) {
+    throw new Error(
+      `Diese Story-Status sind noch keiner Lane zugeordnet: ${unmappedStatuses.join(", ")}. `
+      + "Bitte Lane-Mapping zuerst ergaenzen."
+    );
   }
 
-  const sortedStatuses = Array.from(storiesByStatus.keys()).sort(compareStatuses);
-  const laneCount = sortedStatuses.length;
-  const tallestLaneSize = Math.max(...Array.from(storiesByStatus.values(), (items) => items.length));
+  const viewport = await miro.board.viewport.get();
+  const tallestLaneSize = Math.max(...Array.from(storiesByLaneId.values(), (items) => items.length), 1);
+  const laneCount = LANE_CONFIGS.length;
   const frameWidth = laneCount * LANE_WIDTH + FRAME_PADDING_X * 2;
   const laneHeight =
     LANE_HEADER_HEIGHT +
@@ -340,7 +680,6 @@ async function createVersionFrameAndCards() {
   const lanesTop = frameTop + FRAME_TITLE_SPACE;
 
   const createdCards = [];
-
   setStatus(`${stories.length} Stories gefunden. App Cards werden angelegt ...`);
 
   const frame = await miro.board.createFrame({
@@ -354,7 +693,7 @@ async function createVersionFrameAndCards() {
   const createdLaneItems = [];
   const createdLaneShapes = [];
 
-  for (const [laneIndex, statusName] of sortedStatuses.entries()) {
+  for (const [laneIndex, lane] of LANE_CONFIGS.entries()) {
     const laneLeft = frameLeft + FRAME_PADDING_X + laneIndex * LANE_WIDTH;
     const laneCenterX = laneLeft + LANE_WIDTH / 2;
     const laneShape = await miro.board.createShape({
@@ -365,7 +704,7 @@ async function createVersionFrameAndCards() {
       width: LANE_WIDTH - 12,
       height: laneHeight - 12,
       style: {
-        fillColor: laneFillColor(statusName),
+        fillColor: laneFillColor(lane.id),
         fillOpacity: 1,
         borderColor: "#d1d4db",
         borderOpacity: 1,
@@ -377,7 +716,7 @@ async function createVersionFrameAndCards() {
     createdLaneShapes.push(laneShape);
 
     const laneHeader = await miro.board.createText({
-      content: `<p><strong>${escapeHtml(statusName)}</strong></p>`,
+      content: laneHeaderContent(lane),
       x: laneCenterX,
       y: lanesTop + LANE_HEADER_HEIGHT / 2,
       width: LANE_WIDTH - 24,
@@ -386,13 +725,13 @@ async function createVersionFrameAndCards() {
         fillOpacity: 1,
         color: "#343741",
         fontFamily: "arial",
-        fontSize: 18,
+        fontSize: 14,
         textAlign: "center",
       },
     });
     createdLaneItems.push(laneHeader);
 
-    const laneStories = storiesByStatus.get(statusName) || [];
+    const laneStories = storiesByLaneId.get(lane.id) || [];
     for (const [rowIndex, story] of laneStories.entries()) {
       const x = laneLeft + LANE_WIDTH / 2;
       const y =
@@ -421,16 +760,14 @@ async function createVersionFrameAndCards() {
   for (const item of createdLaneItems) {
     await frame.add(item);
   }
-
   for (const card of createdCards) {
     await frame.add(card);
   }
-
   for (const laneShape of createdLaneShapes) {
     await laneShape.sendToBack();
   }
 
-  setStatus(`Frame "${versionName}" mit ${stories.length} verknuepften App Cards in ${laneCount} Status-Bereichen angelegt.`);
+  setStatus(`Frame "${versionName}" mit ${stories.length} verknuepften App Cards in ${laneCount} Kanban-Spalten angelegt.`);
 }
 
 function setAuthUi(hasUsableToken) {
@@ -440,7 +777,6 @@ function setAuthUi(hasUsableToken) {
     statusActionsNode.hidden = false;
     return;
   }
-
   clearOauthStatusIfPresent();
 }
 
@@ -473,11 +809,11 @@ async function startOauthFlow(config) {
 }
 
 async function bootstrap() {
-  const config = await fetchConfig();
+  appConfig = await fetchConfig();
   await resolveCurrentBoardId();
-  await registerAppCardEvents(config);
+  await registerAppCardEvents(appConfig);
   await loadRecentVersions();
-  const oauthStatus = await fetchOauthStatus(config, currentBoardId);
+  const oauthStatus = await fetchOauthStatus(appConfig, currentBoardId);
   setAuthUi(oauthStatus.hasUsableToken);
 
   createButton.addEventListener("click", async () => {
@@ -494,7 +830,7 @@ async function bootstrap() {
       clearStatus();
       await createVersionFrameAndCards();
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : String(error));
+      showErrorDialog(error instanceof Error ? error.message : String(error));
     }
   });
 
@@ -502,7 +838,7 @@ async function bootstrap() {
     try {
       clearStatus();
       await loadRecentVersions();
-      const refreshedOauthStatus = await fetchOauthStatus(config, await resolveCurrentBoardId());
+      const refreshedOauthStatus = await fetchOauthStatus(appConfig, await resolveCurrentBoardId());
       setAuthUi(refreshedOauthStatus.hasUsableToken);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
@@ -511,11 +847,19 @@ async function bootstrap() {
 
   authButton.addEventListener("click", async () => {
     try {
-      await startOauthFlow(config);
+      await startOauthFlow(appConfig);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
     }
   });
+
+  if (debugToggleButton) {
+    setDebugState(false);
+    debugToggleButton.addEventListener("click", () => {
+      setDebugState(!debugEnabled);
+      setStatus(debugEnabled ? "[DEBUG] Debug-Modus aktiviert." : "");
+    });
+  }
 }
 
 bootstrap().catch((error) => {

@@ -438,6 +438,49 @@ code {
   display: none;
 }
 
+.app-dialog {
+  width: min(100%, 420px);
+  display: grid;
+  gap: 16px;
+  padding: 20px;
+}
+
+.app-dialog-head {
+  display: grid;
+  gap: 8px;
+}
+
+.app-dialog-head .heading,
+.app-dialog-head .subtle {
+  margin: 0;
+}
+
+.app-dialog-body {
+  display: grid;
+  gap: 10px;
+}
+
+.app-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.app-choice-option {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: start;
+  padding: 10px 12px;
+  border: 1px solid var(--indigo100);
+  border-radius: var(--border-radius-medium);
+  background: var(--white);
+}
+
+.app-choice-option input {
+  margin-top: 2px;
+}
+
 select,
 textarea {
   width: 100%;
@@ -529,7 +572,7 @@ dd {
 
 .icon-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 16px;
 }
 
@@ -537,11 +580,45 @@ dd {
   margin: 0 0 8px;
 }
 
-.icon-preview {
+.icon-card {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  overflow: hidden;
+  align-content: start;
+}
+
+.setup-icon-preview {
   display: block;
-  width: 96px;
-  height: 96px;
-  margin: 12px 0 16px;
+  width: 84px;
+  height: 84px;
+  object-fit: contain;
+  padding: 8px;
+  border: 1px solid var(--indigo100);
+  border-radius: var(--border-radius-medium);
+  background: var(--indigo50);
+}
+
+.setup-heading {
+  margin: 0 0 12px;
+}
+
+.setup-subtle {
+  margin: 0 0 12px;
+}
+
+.setup-json {
+  margin: 0;
+  padding: 16px;
+  border: 1px solid var(--indigo100);
+  border-radius: var(--border-radius-medium);
+  background: var(--indigo50);
+  color: var(--indigo700);
+  font-size: var(--font-size-small);
+  line-height: 1.5;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .op-modal-body {

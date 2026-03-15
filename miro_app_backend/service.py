@@ -58,6 +58,9 @@ class MiroAppCardService:
     def list_all_statuses(self) -> list[str]:
         return self.openproject.fetch_all_statuses()
 
+    def list_allowed_status_transitions(self, work_package_id: int) -> list[str]:
+        return self.openproject.fetch_allowed_status_transitions(work_package_id)
+
     def get_story(self, work_package_id: int) -> Story:
         return self.openproject.fetch_story(work_package_id)
 
@@ -155,6 +158,7 @@ class MiroAppCardService:
             "link": asdict(link),
             "story": self._story_to_public_dict(story),
             "comments": [self._comment_to_public_dict(item) for item in self.list_story_comments(link.work_package_id)],
+            "allowedStatusTransitions": self.list_allowed_status_transitions(link.work_package_id),
         }
 
     def get_comments(

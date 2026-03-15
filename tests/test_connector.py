@@ -447,6 +447,43 @@ class ConnectorTests(unittest.TestCase):
         )
         self.assertEqual(story.status_name, "Ready")
 
+    def test_openproject_fetch_allowed_status_transitions_reads_form_values(self) -> None:
+        client = OpenProjectClient("https://openproject.example.com", "token")
+
+        class DummyHttp:
+            def get_json(self, path, query=None):
+                if path == "/api/v3/work_packages/8":
+                    return {
+                        "id": 8,
+                        "lockVersion": 4,
+                        "_links": {"schema": {"href": "/api/v3/work_packages/schemas/default"}},
+                    }
+                raise AssertionError(f"Unexpected path {path}")
+
+            def post_json(self, path, payload):
+                if path == "/api/v3/work_packages/8/form":
+                    return {
+                        "_embedded": {
+                            "schema": {
+                                "status": {
+                                    "_embedded": {
+                                        "allowedValues": [
+                                            {"name": "in Arbeit"},
+                                            {"name": "Geblockt"},
+                                        ]
+                                    }
+                                }
+                            }
+                        }
+                    }
+                raise AssertionError(f"Unexpected post path {path}")
+
+        client.http = DummyHttp()
+        self.assertEqual(
+            client.fetch_allowed_status_transitions(8),
+            ["in Arbeit", "Geblockt"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

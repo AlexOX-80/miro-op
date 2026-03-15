@@ -96,6 +96,23 @@ class OpenProjectClient:
         ]
         return [name for name in names if name]
 
+    def fetch_allowed_status_transitions(self, work_package_id: int) -> list[str]:
+        work_package = self.http.get_json(f"/api/v3/work_packages/{work_package_id}")
+        allowed_values = self._allowed_status_values_from_form(
+            int(work_package["id"]),
+            int(work_package["lockVersion"]),
+        )
+        if not allowed_values:
+            schema_href = work_package.get("_links", {}).get("schema", {}).get("href")
+            if schema_href:
+                schema = self.http.get_json(schema_href)
+                allowed_values = (
+                    schema.get("status", {})
+                    .get("_embedded", {})
+                    .get("allowedValues", [])
+                )
+        return [str(item.get("name", "")).strip() for item in allowed_values if item.get("name")]
+
     def fetch_story(self, work_package_id: int) -> Story:
         response = self.http.get_json(f"/api/v3/work_packages/{work_package_id}")
         return self._parse_story(response)

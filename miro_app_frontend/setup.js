@@ -1,5 +1,6 @@
 const gridNode = document.querySelector("#setup-grid");
 const iconGridNode = document.querySelector("#icon-grid");
+const authJsonNode = document.querySelector("#setup-auth-json");
 
 function appendRow(label, value) {
   const dt = document.createElement("dt");
@@ -9,6 +10,19 @@ function appendRow(label, value) {
   code.textContent = value;
   dd.append(code);
   gridNode.append(dt, dd);
+}
+
+function renderAuthJson(payload) {
+  const authPayload = {
+    hasStoredToken: payload.hasStoredToken,
+    hasFallbackToken: payload.hasFallbackToken,
+    redirectUri: payload.redirectUri,
+    hasHeaderToken: payload.hasHeaderToken,
+    hasCookieToken: payload.hasCookieToken,
+    hasValidToken: payload.hasValidToken,
+    hasUsableToken: payload.hasUsableToken,
+  };
+  authJsonNode.textContent = JSON.stringify(authPayload, null, 2);
 }
 
 async function bootstrap() {
@@ -25,7 +39,7 @@ async function bootstrap() {
   appendRow("OAuth Start URL", payload.oauthStartUrl);
   appendRow("OAuth Status URL", payload.oauthStatusUrl);
   appendRow("OAuth Redirect URI", payload.oauthRedirectUri);
-  appendRow("Board ID", payload.boardId);
+  renderAuthJson(payload);
 
   for (const icon of payload.icons) {
     const card = document.createElement("article");
@@ -37,11 +51,12 @@ async function bootstrap() {
     const preview = document.createElement("img");
     preview.src = icon.url;
     preview.alt = icon.label;
-    preview.className = "icon-preview";
+    preview.className = "setup-icon-preview";
 
     const link = document.createElement("a");
     link.href = icon.url;
     link.textContent = "SVG herunterladen";
+    link.className = "button button-secondary button-small";
     link.setAttribute("download", "");
 
     card.append(title, preview, link);
@@ -51,4 +66,9 @@ async function bootstrap() {
 
 bootstrap().catch((error) => {
   appendRow("Fehler", error instanceof Error ? error.message : String(error));
+  authJsonNode.textContent = JSON.stringify(
+    { error: error instanceof Error ? error.message : String(error) },
+    null,
+    2
+  );
 });
