@@ -1,5 +1,6 @@
 const statusNode = document.querySelector("#status");
 const createButton = document.querySelector("#create-disconnected");
+const refreshAllCardsButton = document.querySelector("#refresh-all-cards");
 const createVersionButton = document.querySelector("#create-version-board");
 const reloadVersionsButton = document.querySelector("#reload-versions");
 const versionSelectNode = document.querySelector("#version-select");
@@ -17,6 +18,8 @@ const FRAME_PADDING_Y = 48;
 const FRAME_TITLE_SPACE = 84;
 const LANE_HEADER_HEIGHT = 44;
 const LANE_INNER_PADDING_Y = 18;
+const LANE_CAPACITY_BUFFER_ROWS = 2;
+const SYNC_INCONSISTENT_FIELD_VALUE = "Status-Sync inkonsistent";
 
 const LANE_CONFIGS = [
   {
@@ -222,6 +225,13 @@ function errorMessageFromPayload(payload) {
   return payload.message || payload.error || JSON.stringify(payload);
 }
 
+function withoutSyncStateFields(fields) {
+  return (Array.isArray(fields) ? fields : []).filter((field) => {
+    const value = String(field?.value || "");
+    return value !== SYNC_INCONSISTENT_FIELD_VALUE && value !== "Sync-Fehler";
+  });
+}
+
 function normalizeDialogChoiceResult(value) {
   if (typeof value === "string") {
     return value.trim();
@@ -409,10 +419,45 @@ function applyConnectedCardPayload(boardCard, payload) {
     boardCard.description = appCardData.description;
   }
   if (Array.isArray(appCardData.fields)) {
-    boardCard.fields = appCardData.fields;
+    boardCard.fields = withoutSyncStateFields(appCardData.fields);
   }
   boardCard.status = "connected";
   return boardCard.sync();
+}
+
+async function syncCardConsistency(boardCard, payload = null) {
+  if (!boardCard || boardCard.type !== "app_card" || boardCard.status !== "connected") {
+    return false;
+  }
+  const parentId = boardCard.parentId || boardCard.parent?.id;
+  if (!parentId) {
+    return false;
+  }
+  const frame = await miro.board.getById(parentId);
+  if (!frame || frame.type !== "frame") {
+    return false;
+  }
+  const laneMatch = laneForCardPosition(boardCard, frame);
+  if (!laneMatch) {
+    return false;
+  }
+  const lane = laneMatch.lane;
+  const storyStatus = payload?.story?.statusName || "";
+  const statusLane = laneConfigForStatus(storyStatus);
+  const fields = withoutSyncStateFields(boardCard.fields);
+  let inconsistent = false;
+  if (statusLane && statusLane.id !== lane.id) {
+    inconsistent = true;
+    fields.unshift({
+      value: SYNC_INCONSISTENT_FIELD_VALUE,
+      fillColor: "#fff3bf",
+      textColor: "#7a5a00",
+      tooltip: `OpenProject Status "${storyStatus}" passt nicht zur aktuellen Spalte "${lane.label}". Bitte Karte manuell verschieben und danach den Status uebernehmen.`,
+    });
+  }
+  boardCard.fields = fields.slice(0, 20);
+  await boardCard.sync();
+  return inconsistent;
 }
 
 function buildStoriesByLane(stories) {
@@ -774,6 +819,49 @@ async function connectCreatedAppCard(appCardId, workPackageId) {
   }
 }
 
+async function refreshConnectedCard(boardCard) {
+  const appCardId = String(boardCard?.id || "");
+  if (!appCardId) {
+    return { updated: false };
+  }
+  const fallbackWorkPackageId = readStoryIdFromDescription(boardCard.description);
+  const boardId = await resolveCurrentBoardId();
+  const query = new URLSearchParams({ board_id: boardId });
+  if (fallbackWorkPackageId) {
+    query.set("work_package_id", String(fallbackWorkPackageId));
+  }
+  const payload = await fetchJson(`/api/app-cards/${encodeURIComponent(appCardId)}/refresh?${query.toString()}`, {
+    method: "PATCH",
+  });
+  await applyConnectedCardPayload(boardCard, payload);
+  const inconsistent = await syncCardConsistency(boardCard, payload);
+  return { updated: true, inconsistent };
+}
+
+async function refreshAllConnectedCards() {
+  const boardItems = await miro.board.get({ type: "app_card" });
+  const connectedCards = (Array.isArray(boardItems) ? boardItems : []).filter((item) => item?.status === "connected");
+  if (!connectedCards.length) {
+    setStatus("Keine verbundenen App Cards auf diesem Board gefunden.");
+    return;
+  }
+
+  let refreshed = 0;
+  let inconsistent = 0;
+  for (const card of connectedCards) {
+    const payload = await refreshConnectedCard(card);
+    if (payload.updated) {
+      refreshed += 1;
+      if (payload.inconsistent) {
+        inconsistent += 1;
+      }
+    }
+  }
+  setStatus(
+    `${refreshed} Cards aus OpenProject aktualisiert.${inconsistent ? ` ${inconsistent} davon sind als Status-Sync inkonsistent markiert.` : ""}`
+  );
+}
+
 async function createVersionFrameAndCards() {
   await resolveCurrentBoardId();
   const versionName = versionSelectNode.value;
@@ -801,13 +889,14 @@ async function createVersionFrameAndCards() {
 
   const viewport = await miro.board.viewport.get();
   const tallestLaneSize = Math.max(...Array.from(storiesByLaneId.values(), (items) => items.length), 1);
+  const reservedRows = Math.max(stories.length + LANE_CAPACITY_BUFFER_ROWS, tallestLaneSize + LANE_CAPACITY_BUFFER_ROWS);
   const laneCount = LANE_CONFIGS.length;
   const frameWidth = laneCount * LANE_WIDTH + FRAME_PADDING_X * 2;
   const laneHeight =
     LANE_HEADER_HEIGHT +
     LANE_INNER_PADDING_Y * 2 +
-    tallestLaneSize * CARD_HEIGHT +
-    Math.max(0, tallestLaneSize - 1) * CARD_VERTICAL_GAP;
+    reservedRows * CARD_HEIGHT +
+    Math.max(0, reservedRows - 1) * CARD_VERTICAL_GAP;
   const frameHeight = FRAME_TITLE_SPACE + laneHeight + FRAME_PADDING_Y * 2;
   const frameX = viewport.x;
   const frameY = viewport.y + frameHeight / 2 - 40;
@@ -889,6 +978,7 @@ async function createVersionFrameAndCards() {
       });
 
       await connectCreatedAppCard(card.id, story.id);
+      await syncCardConsistency(card, { story });
       createdCards.push(card);
     }
   }
@@ -959,6 +1049,17 @@ async function bootstrap() {
       setStatus(error instanceof Error ? error.message : String(error));
     }
   });
+
+  if (refreshAllCardsButton) {
+    refreshAllCardsButton.addEventListener("click", async () => {
+      try {
+        clearStatus();
+        await refreshAllConnectedCards();
+      } catch (error) {
+        await showErrorDialog(error instanceof Error ? error.message : String(error));
+      }
+    });
+  }
 
   createVersionButton.addEventListener("click", async () => {
     try {
