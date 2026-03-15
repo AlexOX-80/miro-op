@@ -846,15 +846,31 @@ async function refreshAllConnectedCards() {
     return;
   }
 
+  if (refreshAllCardsButton) {
+    refreshAllCardsButton.disabled = true;
+  }
+
+  setStatus(`Starte Aktualisierung von ${connectedCards.length} Cards ...`);
+
   let refreshed = 0;
   let inconsistent = 0;
-  for (const card of connectedCards) {
-    const payload = await refreshConnectedCard(card);
-    if (payload.updated) {
-      refreshed += 1;
-      if (payload.inconsistent) {
-        inconsistent += 1;
+  try {
+    for (const [index, card] of connectedCards.entries()) {
+      setStatus(
+        `Aktualisiere Cards aus OpenProject: ${index + 1}/${connectedCards.length} verarbeitet` +
+        `${inconsistent ? `, ${inconsistent} inkonsistent` : ""} ...`
+      );
+      const payload = await refreshConnectedCard(card);
+      if (payload.updated) {
+        refreshed += 1;
+        if (payload.inconsistent) {
+          inconsistent += 1;
+        }
       }
+    }
+  } finally {
+    if (refreshAllCardsButton) {
+      refreshAllCardsButton.disabled = false;
     }
   }
   setStatus(
